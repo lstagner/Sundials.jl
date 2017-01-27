@@ -139,6 +139,39 @@ function cvode(f, y0::Vector{Float64}, t::Vector{Float64}, userdata::Any=nothing
     return yres[1:c,:]
 end
 
+function cvode!(mem::CVODEMemPtr, f, y0::Vector{Float64}, t::Vector{Float64}, userdata::Any=nothing;
+               reltol::Float64=1e-3, abstol::Float64=1e-6, callback=(x,y,z)->true, init=true)
+
+    yres = zeros(length(t), length(y0))
+    userfun = UserFunctionAndData(f, userdata)
+    y0nv = NVector(y0)
+
+    if init
+        flag = @checkflag CVodeInit(mem, cfunction(cvodefun, Cint,
+                                   (realtype, N_Vector, N_Vector, Ref{typeof(userfun)})),
+                                    t[1], convert(N_Vector, y0nv))
+        flag = @checkflag CVodeSetUserData(mem, userfun)
+        flag = @checkflag CVodeSStolerances(mem, reltol, abstol)
+        flag = @checkflag CVDense(mem, length(y0))
+    else
+        flag = @checkflag CVodeReInit(mem,t[1],convert(N_Vector, y0nv))
+    end
+
+    yres[1,:] = y0
+    ynv = NVector(copy(y0))
+    tout = [0.0]
+    c = 1
+    for k in 2:length(t)
+        flag = @checkflag CVode(mem, t[k], ynv, tout, CV_NORMAL)
+        if !callback(mem, t[k], ynv)
+            break
+        end
+        yres[k,:] = convert(Vector, ynv)
+        c = c + 1
+    end
+    return yres[1:c,:]
+end
+
 function idasolfun(t::Float64, y::N_Vector, yp::N_Vector, r::N_Vector, userfun::UserFunctionAndData)
     userfun.func(t, convert(Vector, y), convert(Vector, yp), convert(Vector, r), userfun.data)
     return IDA_SUCCESS
